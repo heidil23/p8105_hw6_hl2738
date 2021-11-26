@@ -8,6 +8,9 @@ output: github_document
 library(tidyverse)
 library(car)
 library(modelr)
+library(patchwork)
+
+set.seed(1)
 
 knitr::opts_chunk$set(
   fig.width = 6,
@@ -128,4 +131,85 @@ birthweight %>%
   geom_point()
 ```
 
+#### Compare to two other models
 
+##### Length and gestational age
+
+Scatterplots
+```{r}
+blength_plot = birthweight %>% 
+  ggplot(aes(x = blength, y = bwt)) + 
+  geom_point()
+
+gaweeks_plot = birthweight %>% 
+  ggplot(aes(x = gaweeks, y = bwt)) + 
+  geom_point()
+
+blength_plot + gaweeks_plot
+```
+
+```{r}
+length_age_model = lm(bwt ~ blength + gaweeks, data = birthweight)
+
+length_age_model %>%
+  broom::tidy() %>% 
+  select(term, estimate, p.value) %>% 
+  knitr::kable(digits = 3)
+```
+
+##### Interaction model
+
+```{r}
+interaction_model = lm(bwt ~ bhead + blength + babysex +
+                         bhead * blength + bhead * babysex + blength * babysex,
+                       data = birthweight)
+
+interaction_model %>%
+  broom::tidy() %>% 
+  select(term, estimate, p.value) %>% 
+  knitr::kable(digits = 3)
+```
+
+#### Cross validation
+
+Now we will cross-validation to compare the models
+
+```{r}
+cv_df = 
+  crossv_mc(birthweight, 10) %>% 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)
+  )
+
+cv_df = cv_df %>% 
+  mutate(
+    maternal_mod = map(.x = train, ~lm(bwt ~ ppbmi + mrace + delwt + momage + menarche + smoken, data = .x)),
+    length_age_mod = map(.x = train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+    interaction_mod = map(.x = train, ~lm(bwt ~ bhead + blength + babysex +
+                         bhead * blength + bhead * babysex + blength * babysex, data = .x))
+  ) %>%
+  mutate(
+    rmse_maternal = map2_dbl(.x = maternal_mod, .y = test, ~rmse(model = .x, data = .y)),
+    rmse_length_age = map2_dbl(.x = length_age_mod, .y = test, ~rmse(model = .x, data = .y)),
+    rmse_interaction = map2_dbl(.x = interaction_mod, .y = test, ~rmse(model = .x, data = .y))
+  )
+```
+
+Look at the output
+Ideally using a boxplot
+
+```{r}
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    rmse_maternal:rmse_interaction,
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) %>% 
+  ggplot(aes(x = model, y = rmse)) +
+  geom_boxplot()
+```
+
+Boxplots help us understand across 100 testing and training datasets, which one had the lowest rmse.
