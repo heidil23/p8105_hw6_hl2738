@@ -1,0 +1,131 @@
+---
+title: "P8105 Homework 6"
+author: Heidi Lumish
+output: github_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(car)
+library(modelr)
+
+knitr::opts_chunk$set(
+  fig.width = 6,
+  fig.asp = .6,
+  out.width = "90%"
+)
+
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+```
+
+## Problem 1
+
+#### Import and clean the data
+
+First we will convert all categorical variables to factor variables.
+
+```{r}
+birthweight = read_csv("./data/birthweight.csv") %>%
+  mutate(
+    babysex = as.factor(babysex),
+    frace = as.factor(frace),
+    malform = as.factor(malform),
+    mrace = as.factor(mrace)
+  )
+```
+
+We can check for missing values using the following code, and we see that there are no missing values:
+
+```{r}
+colSums(is.na(birthweight))
+
+```
+
+str(birthweight)
+
+Descriptive statistics
+
+```{r}
+multiple_func <- function(x) {
+  
+    if (is.numeric(x)) {
+
+    min = min(x)
+    max = max(x)
+    mean = mean(x)
+    sd = sd(x)
+    
+    output_df = 
+    tibble(
+      min = min,
+      max = max,
+      mean = mean,
+      sd = sd)
+
+  return(output_df)
+   
+    }     
+}
+
+sapply(birthweight, multiple_func)
+
+```
+
+Menarche should not be 0
+
+```{r}
+birthweight %>% 
+  filter(menarche == 0)
+```
+
+#### Build a regression model
+Propose a regression model for birthweight. This model may be based on a hypothesized structure for the factors that underly birthweight, on a data-driven model-building process, or a combination of the two. Describe your modeling process and show a plot of model residuals against fitted values – use add_predictions and add_residuals in making this plot.
+
+Hypothesis: Maternal factors affect infant's birthweight
+
+Variables to test:
+- Mother's pre-pregnancy BMI (ppbmi)
+- Mother's race (mrace)
+- Mother's weight at delivery (delwt)
+- Mother's age at delivery (momage)
+- Mother's age at menarche (menarche)
+- Cigarette smoking during pregnancy (smoken).
+
+Plots
+```{r}
+scatterplotMatrix(~bwt + ppbmi + delwt + momage + menarche + smoken, data = birthweight)
+
+birthweight %>% 
+  ggplot(aes(x = mrace, y = bwt)) + 
+  geom_boxplot()
+```
+
+Fitting the linear model
+```{r}
+maternal_model = lm(bwt ~ ppbmi + mrace + delwt + momage + menarche + smoken, data = birthweight)
+
+maternal_model %>%
+  broom::tidy() %>% 
+  select(term, estimate, p.value) %>% 
+  knitr::kable(digits = 3)
+```
+
+Show a plot of model residuals against fitted values – use add_predictions and add_residuals in making this plot.
+
+```{r}
+birthweight %>% 
+  add_residuals(maternal_model) %>% 
+  add_predictions(maternal_model) %>% 
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point()
+```
+
+
