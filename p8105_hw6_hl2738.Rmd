@@ -35,13 +35,17 @@ scale_fill_discrete = scale_fill_viridis_d
 
 First we will convert all categorical variables to factor variables.
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
 birthweight = read_csv("./data/birthweight.csv") %>%
   mutate(
     babysex = as.factor(babysex),
     frace = as.factor(frace),
+    frace = fct_recode(frace, "white" = "1", "black" = "2", "asian" = "3", 
+                     "puerto rican" = "4", "other" = "8"),
     malform = as.factor(malform),
-    mrace = as.factor(mrace)
+    mrace = as.factor(mrace),
+    mrace = fct_recode(mrace, "white" = "1", "black" = "2", "asian" = "3", 
+                      "puerto rican" = "4")
   )
 ```
 
@@ -49,12 +53,11 @@ We can check for missing values using the following code, and we see that there 
 
 ```{r}
 colSums(is.na(birthweight))
-
 ```
 
-str(birthweight)
+#### Descriptive statistics
 
-Descriptive statistics
+Next we will obtain descriptive statistics for the continuous variables to assess for data errors.
 
 ```{r}
 multiple_func <- function(x) {
@@ -66,52 +69,83 @@ multiple_func <- function(x) {
     mean = mean(x)
     sd = sd(x)
     
-    output_df = 
-    tibble(
-      min = min,
-      max = max,
-      mean = mean,
-      sd = sd)
-
-  return(output_df)
+    output = c(min, max, mean, sd)
+    
+  return(output)
    
     }     
 }
 
-sapply(birthweight, multiple_func)
+birthweight_numeric = birthweight %>% 
+  select(-babysex, -frace, -malform, -mrace)
 
+as.data.frame(apply(X = birthweight_numeric,
+      FUN = multiple_func, 
+      MARGIN = 2)) %>% 
+  mutate(value = c("min", "max", "mean", "sd"))%>%
+  relocate(value) %>% 
+  knitr::kable()
 ```
 
-Menarche should not be 0
+From the above output, we see that the minimum value for menarche is 0, which is not possible. Therefore, we will exclude menarche = 0.
 
 ```{r}
+birthweight = birthweight %>% 
+  filter(menarche != 0)
+
 birthweight %>% 
-  filter(menarche == 0)
+  summarize(min = min(menarche))
+```
+
+Age 5 is still improbable as an age of menarche, so we will exclude this observation as well.
+
+```{r}
+birthweight = birthweight %>% 
+  filter(menarche != 5)
 ```
 
 #### Build a regression model
-Propose a regression model for birthweight. This model may be based on a hypothesized structure for the factors that underly birthweight, on a data-driven model-building process, or a combination of the two. Describe your modeling process and show a plot of model residuals against fitted values – use add_predictions and add_residuals in making this plot.
+Next we will build a regression model for birthweight, based on the hypothesis that maternal factors affect the infant's birthweight. Therefore, we will test the following variables: 
 
-Hypothesis: Maternal factors affect infant's birthweight
+* Mother's pre-pregnancy BMI (ppbmi)
+* Mother's race (mrace)
+* Mother's weight at delivery (delwt)
+* Mother's age at delivery (momage)
+* Mother's age at menarche (menarche)
+* Cigarette smoking during pregnancy (smoken)
 
-Variables to test:
-- Mother's pre-pregnancy BMI (ppbmi)
-- Mother's race (mrace)
-- Mother's weight at delivery (delwt)
-- Mother's age at delivery (momage)
-- Mother's age at menarche (menarche)
-- Cigarette smoking during pregnancy (smoken).
-
-Plots
+First, we will create plots to assess  the relationship between each of the variables and the outcome of interest (birthweight).
 ```{r}
-scatterplotMatrix(~bwt + ppbmi + delwt + momage + menarche + smoken, data = birthweight)
+ppbmi_plot = birthweight %>% 
+  ggplot(aes(x = ppbmi, y = bwt)) + 
+  geom_point()
 
-birthweight %>% 
+delwt_plot = birthweight %>% 
+  ggplot(aes(x = delwt, y = bwt)) + 
+  geom_point()
+
+momage_plot = birthweight %>% 
+  ggplot(aes(x = momage, y = bwt)) + 
+  geom_point()
+
+menarche_plot = birthweight %>% 
+  ggplot(aes(x = menarche, y = bwt)) + 
+  geom_point()
+
+smoken_plot = birthweight %>% 
+  ggplot(aes(x = smoken, y = bwt)) + 
+  geom_point()
+
+mrace_plot = birthweight %>% 
   ggplot(aes(x = mrace, y = bwt)) + 
   geom_boxplot()
+
+(ppbmi_plot + delwt_plot + momage_plot) / (smoken_plot + mrace_plot + plot_spacer())
+
 ```
 
-Fitting the linear model
+Next, we will fit the linear model for maternal factors and extract the intercept and coefficients, with their p-values, using 'broom::tidy'.
+
 ```{r}
 maternal_model = lm(bwt ~ ppbmi + mrace + delwt + momage + menarche + smoken, data = birthweight)
 
@@ -120,8 +154,9 @@ maternal_model %>%
   select(term, estimate, p.value) %>% 
   knitr::kable(digits = 3)
 ```
+We can see that all of the coefficients are statistically significant except for mrace3 and menarche. The coefficients for pre-pregnancy BMI, Asian maternal race, Puerto Rican maternal race, and average number of cigarettes smoked are all negative, suggesting that an increase in BMI or number of cigarettes smoked, or having an Asian or Puerto Rican mother is associated with a statistically significant decrease in infant birthweight. By contrast, the coefficients for mother's weight at delivery and mother's age are positive, suggesting that in increase in each of these is associated with a statistically significant increase in infant birthweight.
 
-Show a plot of model residuals against fitted values – use add_predictions and add_residuals in making this plot.
+Here we create a plot of the model residuals against the fitted values.
 
 ```{r}
 birthweight %>% 
@@ -133,9 +168,11 @@ birthweight %>%
 
 #### Compare to two other models
 
+Now we will compare the above model looking at the association between maternal factors and birthweight with two other models.
+
 ##### Length and gestational age
 
-Scatterplots
+The first model will include only length at birth and gestational age as predictors. From the scatterplots below, we see that each variable appears to have an overall linear relationship with birthweight.
 ```{r}
 blength_plot = birthweight %>% 
   ggplot(aes(x = blength, y = bwt)) + 
@@ -148,6 +185,7 @@ gaweeks_plot = birthweight %>%
 blength_plot + gaweeks_plot
 ```
 
+Next we will build the model and extract the coefficients.
 ```{r}
 length_age_model = lm(bwt ~ blength + gaweeks, data = birthweight)
 
@@ -157,7 +195,11 @@ length_age_model %>%
   knitr::kable(digits = 3)
 ```
 
+We can see that both birth length and gestational age in weeks have a statistically significant positive relationship with birthweight.
+
 ##### Interaction model
+
+Next we will build a model using head circumference, length, sex, and all interactions between these.
 
 ```{r}
 interaction_model = lm(bwt ~ bhead + blength + babysex +
@@ -169,10 +211,11 @@ interaction_model %>%
   select(term, estimate, p.value) %>% 
   knitr::kable(digits = 3)
 ```
+Based on a significance level of p < 0.05, we can see that the only significant predictor of birthweight in this model is birth head circumference. The interaction term between head circumference and length at birth is also statistically significant.
 
 #### Cross validation
 
-Now we will cross-validation to compare the models
+Now we will use cross-validation to compare the three models
 
 ```{r}
 cv_df = 
@@ -196,8 +239,7 @@ cv_df = cv_df %>%
   )
 ```
 
-Look at the output
-Ideally using a boxplot
+We will examine the output of the cross validation using a box plot.
 
 ```{r}
 cv_df %>% 
@@ -212,14 +254,15 @@ cv_df %>%
   geom_boxplot()
 ```
 
-Boxplots help us understand across 100 testing and training datasets, which one had the lowest rmse.
+From the boxplots, we can see that across 100 testing and training datasets, the third model ("interaction model") had the lowest RMSE and is therefore the most optimal model.
 
 
 ## Problem 2: Central Park Weather Data
 
 #### Download the data
 
-```{r}
+First we will import the Central Park weather data from 2017.
+```{r, message = FALSE, warning = FALSE}
 weather_df = 
   rnoaa::meteo_pull_monitors(
     c("USW00094728"),
@@ -233,9 +276,7 @@ weather_df =
   select(name, id, everything())
 ```
 
-We’ll focus on a simple linear regression with tmax as the response and tmin as the predictor, and are interested in the distribution of two quantities estimated from these data:
-
-Use 5000 bootstrap samples and, for each bootstrap sample, produce estimates of these two quantities. Plot the distribution of your estimates, and describe these in words. Using the 5000 bootstrap estimates, identify the 2.5% and 97.5% quantiles to provide a 95% confidence interval for r̂ 2 and log(β̂ 0∗β̂ 1). Note: broom::glance() is helpful for extracting r̂ 2 from a fitted regression, and broom::tidy() (with some additional wrangling) should help in computing log(β̂ 0∗β̂ 1).
+We will create a simple linear regression with tmax as the response and tmin as the predictor. We will look at the distributions of predicted r-squared and log(beta_0 * beta_1).
 
 ```{r}
 bootstrap_weather =
@@ -279,10 +320,9 @@ bootstrap_results =
   )
 ```
 
-Plot distribution of the two estimates
-We can see that both distributions are normally distributed. The estimates in panel A for log(beta0 * beta1) centers around 2.02 and the estimates in panel B for R-squared center around 0.915.
+We will then plot distribution of the two estimates. We can see that both distributions are normally distributed. The estimates in panel A for R-squared center around 0.915 and the estimates in panel B for log(beta0 * beta1) centers around 2.02.
 
-```{r}
+```{r, warning = FALSE}
 r_squared_histo =
   bootstrap_results %>% 
   ggplot(aes(x = r_squared)) +
@@ -296,7 +336,7 @@ beta0_beta1_histo = bootstrap_results %>%
   labs(x = "log(beta0 * beta1)", 
       y = "Frequency")
 
-estimates = beta0_beta1_histo + r_squared_histo
+estimates = r_squared_histo + beta0_beta1_histo
 
 estimates + plot_annotation(
   title = 'The distribution of estimates over 5000 bootstrap samples',
@@ -304,15 +344,17 @@ estimates + plot_annotation(
 )
 ```
 
-Obtain 95% CI
+Now we will determine the 95% confidence interval for each estimate.
 
 ```{r}
 bootstrap_results %>% 
   summarize(
-    ci_lower_r2 = quantile(r_squared, 0.025), 
-    ci_upper_r2 = quantile(r_squared, 0.975),
-    ci_lower_b0b1 = quantile(beta0_beta1, 0.025), 
-    ci_upper_b0b1 = quantile(beta0_beta1, 0.975),
+    ci_lower_r2 = round(quantile(r_squared, 0.025), 2), 
+    ci_upper_r2 = round(quantile(r_squared, 0.975), 2),
+    ci_lower_b0b1 = round(quantile(beta0_beta1, 0.025), 2), 
+    ci_upper_b0b1 = round(quantile(beta0_beta1, 0.975), 2),
     ) %>% 
-  knitr::kable()
+  unite("R-squared CI", ci_lower_r2, ci_upper_r2, sep = ", ") %>% 
+  unite("log(beta_0*beta_1) CI", ci_lower_b0b1, ci_upper_b0b1, sep = ", ") %>%
+  knitr::kable(title = "95% Confidence Intervals")
 ```
